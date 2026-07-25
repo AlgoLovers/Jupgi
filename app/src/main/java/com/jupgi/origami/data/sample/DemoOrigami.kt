@@ -19,6 +19,19 @@ import com.jupgi.origami.domain.model.Vec3
 object DemoOrigami {
     private const val N = 8 // 격자 분할 수 (정점 (N+1)²개)
 
+    /**
+     * "반으로 접기"는 정확히 **180°여야 한다.**
+     *
+     * 겹친 레이어가 동일평면이라 렌더러의 깊이 정렬이 흔들리는 문제(체커보드)를 피하려고
+     * 178°를 시도했으나, **다단계 접기가 깨진다**: 1단계에서 움직인 정점이 z=0 평면으로 완전히
+     * 돌아오지 않아(2° 만큼 들림) 2단계 힌지 위에 있어야 할 고정단이 축에서 0.035 벗어나고,
+     * 그 결과 2단계에서 종이가 늘어난다(`FoldInvariants` 가 검출).
+     *
+     * 즉 **레이어 분리는 도메인이 아니라 렌더러의 책임**이다 — 렌더러는 깊이 양자화로 정렬을
+     * 결정적으로 만들고, 근본 해법인 레이어 순서(FOLD faceOrders)는 M2에서 다룬다.
+     */
+    private const val FLAT_FOLD_DEG = 180f
+
     fun model(): OrigamiModel {
         val mesh = buildSquareMesh(N)
 
@@ -30,7 +43,7 @@ object DemoOrigami {
                 hingeStart = Vec3(0f, -1f, 0f),
                 hingeEnd = Vec3(0f, 1f, 0f),
                 movingVertexIndices = leftHalf,
-                foldAngleDeg = 180f,
+                foldAngleDeg = FLAT_FOLD_DEG,
                 assignment = FoldAssignment.VALLEY,
                 instruction = "왼쪽 절반을 세로 중심선을 따라 오른쪽으로 접어 반으로 만듭니다. (계곡접기)",
             )
@@ -44,7 +57,7 @@ object DemoOrigami {
                 hingeStart = Vec3(0f, 0f, 0f),
                 hingeEnd = Vec3(1f, 0f, 0f),
                 movingVertexIndices = topHalf,
-                foldAngleDeg = 180f,
+                foldAngleDeg = FLAT_FOLD_DEG,
                 assignment = FoldAssignment.VALLEY,
                 instruction = "위쪽 절반을 가로 중심선을 따라 아래로 접어 4등분을 만듭니다. (계곡접기)",
             )
