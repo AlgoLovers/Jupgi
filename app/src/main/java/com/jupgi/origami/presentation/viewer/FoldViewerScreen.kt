@@ -1,8 +1,8 @@
 package com.jupgi.origami.presentation.viewer
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +52,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.sin
 
 @Composable
@@ -81,11 +82,7 @@ fun FoldViewerScreen(modifier: Modifier = Modifier) {
 
                 Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     PaperCanvas(
-                        mesh = state.mesh,
-                        creaseStart = state.currentStep?.hingeStart,
-                        creaseEnd = state.currentStep?.hingeEnd,
-                        creaseIsValley = state.currentStep?.assignment != FoldAssignment.MOUNTAIN,
-                        isPlaying = state.isPlaying,
+                        state = state,
                         onTogglePlay = viewModel::togglePlay,
                         onPrev = viewModel::prevStep,
                         onNext = viewModel::nextStep,
@@ -199,11 +196,7 @@ private fun Controls(
  */
 @Composable
 private fun PaperCanvas(
-    mesh: PaperMesh?,
-    creaseStart: Vec3?,
-    creaseEnd: Vec3?,
-    creaseIsValley: Boolean,
-    isPlaying: Boolean,
+    state: FoldViewerUiState,
     onTogglePlay: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
@@ -211,8 +204,10 @@ private fun PaperCanvas(
 ) {
     var yaw by remember { mutableFloatStateOf(0.5f) }
     var pitch by remember { mutableFloatStateOf(-0.55f) }
+    var zoom by remember { mutableFloatStateOf(1f) }
 
     val creaseColor = MaterialTheme.colorScheme.primary
+    val isPlaying = state.isPlaying
 
     Surface(
         modifier = modifier,
@@ -223,11 +218,13 @@ private fun PaperCanvas(
             modifier =
                 Modifier
                     .fillMaxSize()
+                    // 한 손가락 = 카메라 오빗, 두 손가락 = 확대/축소. 배율은 사용자가 정한다
+                    // (자동 줌은 접힐 때마다 배율이 바뀌어 오히려 혼란스럽다).
                     .pointerInput(Unit) {
-                        detectDragGestures { change, drag ->
-                            change.consume()
-                            yaw += drag.x * DRAG_SENSITIVITY
-                            pitch = (pitch + drag.y * DRAG_SENSITIVITY).coerceIn(-PITCH_LIMIT, PITCH_LIMIT)
+                        detectTransformGestures { _, pan, gestureZoom, _ ->
+                            yaw += pan.x * DRAG_SENSITIVITY
+                            pitch = (pitch + pan.y * DRAG_SENSITIVITY).coerceIn(-PITCH_LIMIT, PITCH_LIMIT)
+                            zoom = (zoom * gestureZoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
                         }
                     }.pointerInput(isPlaying) {
                         detectTapGestures { offset ->
@@ -239,20 +236,24 @@ private fun PaperCanvas(
                         }
                     },
         ) {
-            if (mesh == null) return@Canvas
+            val mesh = state.mesh ?: return@Canvas
             val camVerts = mesh.vertices.map { rotateCamera(it, yaw, pitch) }
-            val projection = fitProjection(camVerts, size)
-            drawPaper(mesh, camVerts, projection)
-            if (creaseStart != null && creaseEnd != null) {
-                val a = rotateCamera(creaseStart, yaw, pitch)
-                val b = rotateCamera(creaseEnd, yaw, pitch)
-                drawCrease(projection.toScreen(a), projection.toScreen(b), creaseColor, creaseIsValley)
+            val projection = fixedProjection(size, zoom)
+            // 겹이 쌓이는 방향(base +Z)이 화면 반대쪽을 향하면 레이어 순서를 뒤집는다.
+            val flipLayers = rotateCamera(STACK_UP, yaw, pitch).z < 0f
+            drawPaper(mesh, camVerts, state.layerOrder, flipLayers, projection)
+            val step = state.currentStep
+            if (step != null) {
+                val a = rotateCamera(step.hingeStart, yaw, pitch)
+                val b = rotateCamera(step.hingeEnd, yaw, pitch)
+                val isValley = step.assignment != FoldAssignment.MOUNTAIN
+                drawCrease(projection.toScreen(a), projection.toScreen(b), creaseColor, isValley)
             }
         }
     }
 }
 
-/** 모델 좌표 → 화면 좌표 변환. 매 프레임 메시 크기에 맞춰 다시 계산된다(자동 줌). */
+/** 모델 좌표 → 화면 좌표 변환. */
 private data class Projection(
     val scale: Float,
     val cx: Float,
@@ -262,47 +263,39 @@ private data class Projection(
 }
 
 /**
- * 접힌 메시의 화면 투영 바운딩 박스에 맞춰 확대·중앙 정렬한다.
- * 고정 배율이면 접을수록 종이가 작아져 보기 어렵다.
+ * 펼친 종이 기준 **고정 배율** × 사용자 [zoom]. 화면 중앙 정렬.
+ *
+ * 접힌 크기에 맞춰 자동으로 확대하면 단계마다 배율이 달라져 "종이가 작아졌다/커졌다"가 뒤섞여
+ * 오히려 방향 감각을 잃는다. 배율은 사용자가 핀치로 정한다.
  */
-private fun fitProjection(
-    camVerts: List<Vec3>,
+private fun fixedProjection(
     size: Size,
-): Projection {
-    if (camVerts.isEmpty()) return Projection(1f, size.width / 2f, size.height / 2f)
-    val minX = camVerts.minOf { it.x }
-    val maxX = camVerts.maxOf { it.x }
-    val minY = camVerts.minOf { it.y }
-    val maxY = camVerts.maxOf { it.y }
-    val spanX = (maxX - minX).coerceAtLeast(MIN_SPAN)
-    val spanY = (maxY - minY).coerceAtLeast(MIN_SPAN)
-    val scale = min(size.width / spanX, size.height / spanY) * FIT_RATIO
-    return Projection(
-        scale = scale,
-        cx = size.width / 2f - (minX + maxX) / 2f * scale,
-        cy = size.height / 2f + (minY + maxY) / 2f * scale,
+    zoom: Float,
+): Projection =
+    Projection(
+        scale = min(size.width, size.height) * BASE_FIT_RATIO / MODEL_RADIUS * zoom,
+        cx = size.width / 2f,
+        cy = size.height / 2f,
     )
-}
 
 private fun DrawScope.drawPaper(
     mesh: PaperMesh,
     camVerts: List<Vec3>,
+    layerOrder: List<Int>,
+    flipLayers: Boolean,
     projection: Projection,
 ) {
-    // 화가 알고리즘: 깊이(z) 오름차순 = 먼 면부터 그린다(뷰어는 +Z).
+    // 화가 알고리즘: 먼 것부터 그린다. 키가 두 개인 이유 —
     //
-    // 깊이를 **양자화**하는 이유: 반으로 접으면 겹친 레이어가 동일평면이 되어 centroid z 가
-    // 부동소수 오차 수준으로만 갈린다. 그대로 정렬하면 삼각형마다 이기는 레이어가 뒤바뀌어
-    // 앞면/뒷면이 뒤섞인 체커보드가 된다. 양자화하면 그 면들이 동점이 되고, Kotlin 의 안정
-    // 정렬이 원래 면 순서를 유지해 **결정적이고 일관된** 그림이 나온다.
-    // (정확한 겹 순서는 FOLD faceOrders 가 필요 — M2.)
-    val ordered =
-        mesh.faces.sortedBy { f ->
-            val z = (camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f
-            kotlin.math.round(z / DEPTH_QUANTUM)
-        }
+    // 1) 깊이(z)를 **양자화**: 반으로 접으면 겹친 레이어가 동일평면이 되어 centroid z 가
+    //    부동소수 오차 수준으로만 갈린다. 그대로 정렬하면 삼각형마다 이기는 면이 달라져
+    //    앞/뒷면이 뒤섞인 체커보드가 된다. 양자화하면 그 면들이 동점이 된다.
+    // 2) 동점은 **겹 순서**(ComputeLayerOrderUseCase)로 가린다. 깊이만으로는 알 수 없는
+    //    "어느 종이가 위인가"를 접기 이력에서 계산한 값이다. 뒤에서 보면 순서가 뒤집힌다.
+    val indices = mesh.faces.indices.sortedWith(compareBy({ depthKey(mesh, camVerts, it) }, { layerKey(layerOrder, it, flipLayers) }))
 
-    for (face in ordered) {
+    for (faceIndex in indices) {
+        val face = mesh.faces[faceIndex]
         val p0 = camVerts[face.a]
         val p1 = camVerts[face.b]
         val p2 = camVerts[face.c]
@@ -360,14 +353,40 @@ private fun rotateCamera(
     return Vec3(x1, y2, z2)
 }
 
+/** 깊이 정렬 1차 키 — 양자화해 동일평면 레이어를 동점으로 만든다. */
+private fun depthKey(
+    mesh: PaperMesh,
+    camVerts: List<Vec3>,
+    faceIndex: Int,
+): Float {
+    val f = mesh.faces[faceIndex]
+    return round((camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f / DEPTH_QUANTUM)
+}
+
+/** 깊이 정렬 2차 키 — 겹 순서. 종이 뒤에서 보면 뒤집힌다. */
+private fun layerKey(
+    layerOrder: List<Int>,
+    faceIndex: Int,
+    flip: Boolean,
+): Int {
+    val layer = layerOrder.getOrElse(faceIndex) { 0 }
+    return if (flip) -layer else layer
+}
+
 private const val DRAG_SENSITIVITY = 0.01f
 private const val PITCH_LIMIT = 1.4f
 
-/** 캔버스 대비 종이가 차지할 비율(여백 확보). */
-private const val FIT_RATIO = 0.86f
+/** 펼친 종이가 캔버스에서 차지할 비율(줌 1배 기준). */
+private const val BASE_FIT_RATIO = 0.42f
 
-/** 0으로 나누기 방지 — 종이가 정확히 옆에서 보여 두께가 0이 될 때. */
-private const val MIN_SPAN = 0.05f
+/** 종이 반지름 여유(펼친 정사각형의 대각 반지름 √2 보다 조금 크게). */
+private const val MODEL_RADIUS = 1.5f
+
+private const val MIN_ZOOM = 0.5f
+private const val MAX_ZOOM = 6f
+
+/** 겹이 쌓이는 방향(펼친 종이의 앞면 법선). 카메라가 반대편이면 레이어 순서를 뒤집는다. */
+private val STACK_UP = Vec3(0f, 0f, 1f)
 
 /** 그림자 쪽 최소 밝기(완전히 검어지지 않게). */
 private const val AMBIENT = 0.55f
