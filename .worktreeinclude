@@ -1,0 +1,3 @@
+# 새 워크트리에 복사할 gitignored 파일 (gitignore 문법).
+# ⚠️ keystore.properties / *.keystore 는 절대 넣지 말 것 — 유출면 증가.
+local.properties

@@ -1,0 +1,10 @@
+root = true
+
+[*.{kt,kts}]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+ktlint_function_naming_ignore_when_annotated_with = Composable
+# 작품 팁·한글 KDoc은 문장 중간에서 줄바꿈하면 오히려 읽기 나빠지므로
+# 줄 길이 규칙만 끈다(들여쓰기·임포트 정렬 등 나머지 ktlint 규칙은 유지).
+ktlint_standard_max-line-length = disabled

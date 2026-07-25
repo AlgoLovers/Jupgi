@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">접기</string>
+    <string name="viewer_prev_step">이전 단계</string>
+    <string name="viewer_next_step">다음 단계</string>
+    <string name="viewer_reset">처음으로</string>
+    <string name="viewer_step_label">단계 %1$d / %2$d</string>
+    <string name="viewer_difficulty_label">난이도 %1$d</string>
+    <string name="viewer_drag_hint">드래그해서 돌려보세요 · 슬라이더로 한 단계씩</string>
+</resources>

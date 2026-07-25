@@ -1,0 +1,63 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(*)",
+      "WebSearch",
+      "WebFetch",
+      "Skill(code-review)"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f)",
+      "Bash(git push origin --delete*)",
+      "Bash(git push * --delete*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D*)",
+      "Bash(rm -rf*)",
+      "Bash(sudo *)",
+      "Bash(gh repo delete*)",
+      "Bash(dd *)",
+      "Bash(mkfs*)",
+      "Bash(diskutil * erase*)",
+      "Bash(diskutil erase*)",
+      "Bash(git add -f)",
+      "Bash(git add -f *)",
+      "Bash(git add --force)",
+      "Bash(git add --force *)",
+      "Read(keystore.properties)",
+      "Read(**/*.keystore)",
+      "Edit(keystore.properties)",
+      "Edit(**/*.keystore)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/na982/claude/Jupgi/tools/claude/hooks/session-start-sync.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/na982/claude/Jupgi/tools/claude/hooks/stop-dirty-tree.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

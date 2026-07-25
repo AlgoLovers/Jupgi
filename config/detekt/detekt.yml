@@ -1,0 +1,33 @@
+build:
+  maxIssues: 0
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated: ["Composable"]
+
+style:
+  UnusedPrivateMember:
+    # @Preview 컴포저블은 도구가 호출하므로 '미사용'이 아니다.
+    ignoreAnnotated: ["Preview", "Composable"]
+  MagicNumber:
+    active: false # noisy for Compose dp/sp/color literals
+  ReturnCount:
+    active: false # early returns are preferred style here
+  MaxLineLength:
+    active: false # 한글 문제 지문·해설과 KDoc은 줄바꿈보다 한 줄 유지가 읽기 좋음
+
+complexity:
+  LongMethod:
+    threshold: 100 # 화면 컴포저블은 선언형이라 자연스럽게 길어진다
+  LongParameterList:
+    functionThreshold: 13 # 문제 시딩 헬퍼(mc)
+    constructorThreshold: 13 # Problem 등 도메인 모델 data class
+    ignoreDefaultParameters: true
+  TooManyFunctions:
+    thresholdInFiles: 25
+    thresholdInClasses: 25
+    thresholdInInterfaces: 25 # Repository 인터페이스가 학습자 상태 오퍼레이션을 모은다

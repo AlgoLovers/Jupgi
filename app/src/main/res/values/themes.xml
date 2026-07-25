@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose가 실제 색을 그리므로 여기선 시스템 바/스플래시용 최소 테마만 둔다. -->
+    <style name="Theme.Jupgi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    </style>
+</resources>

@@ -1,0 +1,30 @@
+# ── 빌드 산출물 ─────────────────────────────
+*.iml
+.gradle/
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ── 로컬 설정 (커밋 금지) ──────────────────
+/local.properties
+.idea/
+*.log
+
+# ── 비밀 / 서명키 (절대 커밋 금지 — 유출 시 앱 업데이트 불가) ──
+keystore.properties
+*.keystore
+*.jks
+.env
+.env.*
+
+# ── OS ─────────────────────────────────────
+.DS_Store
+
+# ── Claude 워크트리 (격리 작업 공간, 공유 금지) ──
+/.claude/worktrees/
