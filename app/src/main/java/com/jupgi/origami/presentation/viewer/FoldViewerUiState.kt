@@ -17,4 +17,9 @@ data class FoldViewerUiState(
     /** 지금 설명을 보여줄 단계(없으면 null — 완전히 펼쳐진 시작 상태). */
     val currentStep: FoldStep? = null,
     val currentStepNumber: Int = 0,
+    /**
+     * 자동 재생 중인가. 종이접기는 두 손이 종이에 묶여 있어 매 단계 조작이 어렵다 —
+     * 기존 앱(OriSim3D)도 자동 재생을 기본으로 두고 터치는 일시정지에만 쓴다.
+     */
+    val isPlaying: Boolean = false,
 )
