@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jupgi.origami.R
+import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldAssignment
 import com.jupgi.origami.domain.model.PaperMesh
 import com.jupgi.origami.domain.model.Vec3
@@ -285,37 +286,47 @@ private fun DrawScope.drawPaper(
     flipLayers: Boolean,
     projection: Projection,
 ) {
-    // 화가 알고리즘: 먼 것부터 그린다. 키가 두 개인 이유 —
+    // ── 겹(layer) 단위 렌더링 ────────────────────────────────────────────────
     //
-    // 1) 깊이(z)를 **양자화**: 반으로 접으면 겹친 레이어가 동일평면이 되어 centroid z 가
-    //    부동소수 오차 수준으로만 갈린다. 그대로 정렬하면 삼각형마다 이기는 면이 달라져
-    //    앞/뒷면이 뒤섞인 체커보드가 된다. 양자화하면 그 면들이 동점이 된다.
-    // 2) 동점은 **겹 순서**(ComputeLayerOrderUseCase)로 가린다. 깊이만으로는 알 수 없는
-    //    "어느 종이가 위인가"를 접기 이력에서 계산한 값이다. 뒤에서 보면 순서가 뒤집힌다.
-    val indices = mesh.faces.indices.sortedWith(compareBy({ depthKey(mesh, camVerts, it) }, { layerKey(layerOrder, it, flipLayers) }))
+    // 삼각형을 **개별로** 정렬해 그리면, 반으로 접혀 4겹이 완전히 포개진 순간 삼각형마다
+    // 이기는 겹이 달라져 앞/뒷면이 뒤섞인 체커보드가 된다. 정렬 키를 아무리 정교하게 만들어도
+    // 삼각형 단위로 그리는 구조 자체가 원인이다.
+    //
+    // 그래서 **같은 겹의 삼각형들을 하나의 Path 로 묶어 한 번에 칠한다.** 한 겹은 강체 변환을
+    // 함께 받으므로 항상 한 평면이고, 따라서 색·음영도 하나다. 겹 안에서 순서가 뒤집힐 여지가
+    // 원천적으로 사라지고, 삼각형 경계의 안티앨리어싱 이음매(격자무늬)도 함께 없어진다.
+    // (평평 접힌 종이는 일반 깊이 정렬로 풀리지 않아 면 단위 겹침 관계를 따로 관리해야 한다는
+    //  "Rendering Method for Flat Origami"(Eurographics)의 결론과 같은 방향이다.)
+    val groups = mesh.faces.indices.groupBy { layerOrder.getOrElse(it) { 0 } }
 
-    for (faceIndex in indices) {
-        val face = mesh.faces[faceIndex]
-        val p0 = camVerts[face.a]
-        val p1 = camVerts[face.b]
-        val p2 = camVerts[face.c]
-        val normal = (p1 - p0).cross(p2 - p0).normalized()
+    val ordered =
+        groups.entries.sortedWith(
+            compareBy(
+                { (_, faces) -> groupDepth(mesh, camVerts, faces) },
+                { (layer, _) -> if (flipLayers) -layer else layer },
+            ),
+        )
+
+    for ((_, faceIndices) in ordered) {
+        val representative = mesh.faces[faceIndices.first()]
+        val normal = faceNormal(camVerts, representative)
         // 종이는 양면 — 실제 색종이처럼 앞은 색, 뒤는 흰색. 배경과 섞이지 않게 테마와 독립적으로 둔다.
         val base = if (normal.z >= 0f) PAPER_FRONT else PAPER_BACK
         val lambert = abs(normal.dot(LIGHT_DIR))
         val brightness = (AMBIENT + (1f - AMBIENT) * lambert).coerceIn(0f, 1f)
         val shaded = Color(base.red * brightness, base.green * brightness, base.blue * brightness, 1f)
 
-        val path =
-            Path().apply {
-                val s0 = projection.toScreen(p0)
-                val s1 = projection.toScreen(p1)
-                val s2 = projection.toScreen(p2)
-                moveTo(s0.x, s0.y)
-                lineTo(s1.x, s1.y)
-                lineTo(s2.x, s2.y)
-                close()
-            }
+        val path = Path()
+        for (index in faceIndices) {
+            val face = mesh.faces[index]
+            val s0 = projection.toScreen(camVerts[face.a])
+            val s1 = projection.toScreen(camVerts[face.b])
+            val s2 = projection.toScreen(camVerts[face.c])
+            path.moveTo(s0.x, s0.y)
+            path.lineTo(s1.x, s1.y)
+            path.lineTo(s2.x, s2.y)
+            path.close()
+        }
         drawPath(path, color = shaded)
     }
 }
@@ -353,24 +364,30 @@ private fun rotateCamera(
     return Vec3(x1, y2, z2)
 }
 
-/** 깊이 정렬 1차 키 — 양자화해 동일평면 레이어를 동점으로 만든다. */
-private fun depthKey(
+/**
+ * 겹 전체의 대표 깊이(양자화). 완전히 접히면 겹들의 깊이가 같아져 동점이 되고,
+ * 그때는 겹 순서가 앞뒤를 가른다. 접히는 중에는 깊이가 실제로 달라 이 값이 우선한다.
+ */
+private fun groupDepth(
     mesh: PaperMesh,
     camVerts: List<Vec3>,
-    faceIndex: Int,
+    faceIndices: List<Int>,
 ): Float {
-    val f = mesh.faces[faceIndex]
-    return round((camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f / DEPTH_QUANTUM)
+    var sum = 0f
+    for (index in faceIndices) {
+        val f = mesh.faces[index]
+        sum += (camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f
+    }
+    return round(sum / faceIndices.size / DEPTH_QUANTUM)
 }
 
-/** 깊이 정렬 2차 키 — 겹 순서. 종이 뒤에서 보면 뒤집힌다. */
-private fun layerKey(
-    layerOrder: List<Int>,
-    faceIndex: Int,
-    flip: Boolean,
-): Int {
-    val layer = layerOrder.getOrElse(faceIndex) { 0 }
-    return if (flip) -layer else layer
+/** 면의 법선(카메라 좌표계). 한 겹은 한 평면이라 대표 면 하나로 겹 전체의 향을 정할 수 있다. */
+private fun faceNormal(
+    camVerts: List<Vec3>,
+    face: Face,
+): Vec3 {
+    val p0 = camVerts[face.a]
+    return (camVerts[face.b] - p0).cross(camVerts[face.c] - p0).normalized()
 }
 
 private const val DRAG_SENSITIVITY = 0.01f
