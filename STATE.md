@@ -22,6 +22,9 @@
 
 ## 결정 로그 (최신 위)
 
+- **2026-07-25 · 원격 = github.com/AlgoLovers/Jupgi (PRIVATE) 연결·`main` 푸시 완료.**
+  형제 리포(ddakpul·Checkmatey)는 PUBLIC이지만, 공개는 비가역(클론·인덱싱)이라 private으로 시작.
+  공개 전환은 `gh repo edit AlgoLovers/Jupgi --visibility public --accept-visibility-change-consequences`.
 - **2026-07-25 · 3D 엔진 = SceneView(Filament) 채택, 단 M0/M1 렌더러는 Compose Canvas 소프트 3D로 시작.**
   근거: 리서치(docs/ARCHITECTURE.md) — 물리 시뮬(Ghassaei)은 튜토리얼 이산 단계와 입도 불일치,
   오서링된 키프레임 + 힌지 회전이 정답. 도메인이 렌더러 독립적이라 Canvas→Filament 무손실 교체.
@@ -31,13 +34,22 @@
 
 ## 다음 액션 (우선순위 순)
 
-1. **로컬 git 최초 커밋** — M0 골격 전체를 커밋(`feat: M0 골격 …`). 이후 GitHub 원격(AlgoLovers/Jupgi) 연결 여부 결정.
-2. **작품 라이브러리 화면(M1)** — 작품 목록 → 뷰어 네비게이션(navigation-compose). 데모 외 작품 1~2개 추가(`/add-model`).
-3. **FOLD 임포터(M1)** — `data`에 FOLD(JSON) → OrigamiModel 변환기 + 임포트 테스트.
-4. **뷰어 폴리시** — 다크에서 뒷면색 대비 개선, 태블릿 side-by-side 레이아웃(WindowSizeClass), 재생(자동 접기) 버튼.
+1. **작품 라이브러리 화면(M1)** — 작품 목록 → 뷰어 네비게이션(navigation-compose). 데모 외 작품 1~2개 추가(`/add-model`).
+2. **FOLD 임포터(M1)** — `data`에 FOLD(JSON) → OrigamiModel 변환기 + 임포트 테스트.
+3. **뷰어 폴리시** — 다크에서 뒷면색 대비 개선, 태블릿 side-by-side 레이아웃(WindowSizeClass), 재생(자동 접기) 버튼.
+4. **브랜치 전략 확정** — 현재 `main` 단독. 딱풀식 `main`(배포)/`develop`(통합)/`feature/*`로 갈지 결정.
 
 ## 알려진 이슈 / 폴리시 백로그
 
 - 다크 모드에서 종이 뒷면색(surface)이 배경과 가까워 접힌 면 대비가 약함 — 렌더러에서 뒷면 전용 색 지정 필요.
 - 완전히 접힌 상태(각 180°)는 레이어가 동일평면이라 z-fighting 소지 — faceOrders 기반 레이어 오프셋은 복합 접기 도입 시 대응.
 - 런처 아이콘은 임시 종이비행기 글리프 — 정식 브랜딩 필요.
+- **SceneView 교체(M2+) 선결 조건** (2026-07-25 Maven POM 직접 확인):
+  `io.github.sceneview:sceneview:4.25.0`은 **`kotlin-stdlib 2.4.10`에 의존** — 현재 카탈로그가
+  Kotlin 2.0.21이라 그대로 붙이면 메타데이터 비호환으로 깨진다. Kotlin·KSP·Hilt·AGP 동반 상향 필요
+  (AGP 8.x 최신 8.13.2). Compose BOM은 SceneView가 참조하는 2026.06.01, 번들 Filament 1.72.1, minSdk 24.
+  `LineNode`/`PathNode`가 1급 API라 3D 크리스 가이드선을 직접 구현할 필요 없고, 동적 폴딩 메시는
+  `MeshNode(primitiveType, vertexBuffer, indexBuffer, …)`로 버퍼를 직접 제어한다.
+  ⚠️ **함정**: sceneview 이슈 #1841 — 매 프레임 정점 업로드 시 ByteBuffer 캐시 재사용이 Filament의
+  비동기 버퍼 수명 계약을 위반해 메시가 찢어진다(PR #1851 수정). `setBufferAt` 콜백 + 2개 링버퍼
+  패턴을 `.claude/rules/`에 명문화할 것. SceneView는 MCP 서버·`llms.txt`·컴파일 샘플 33개를 제공한다.
