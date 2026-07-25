@@ -2,6 +2,7 @@ package com.jupgi.origami.presentation.viewer
 
 import com.jupgi.origami.domain.model.FoldStep
 import com.jupgi.origami.domain.model.PaperMesh
+import com.jupgi.origami.domain.usecase.ComputeLayerOrderUseCase
 
 /**
  * 뷰어 화면의 단일 불변 UI 상태. progress 하나로 재생 위치가 정해지고, mesh 는 그에 대응하는
@@ -22,4 +23,9 @@ data class FoldViewerUiState(
      * 기존 앱(OriSim3D)도 자동 재생을 기본으로 두고 터치는 일시정지에만 쓴다.
      */
     val isPlaying: Boolean = false,
+    /**
+     * 면별 겹 높이(클수록 위). 반으로 접으면 레이어가 동일평면이 되어 깊이만으로는 앞뒤를
+     * 가릴 수 없다 — 렌더러가 이 값으로 순서를 정한다([ComputeLayerOrderUseCase]).
+     */
+    val layerOrder: List<Int> = emptyList(),
 )

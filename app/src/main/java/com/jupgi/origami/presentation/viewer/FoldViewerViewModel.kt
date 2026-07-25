@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jupgi.origami.domain.model.OrigamiModel
 import com.jupgi.origami.domain.repository.OrigamiRepository
+import com.jupgi.origami.domain.usecase.ComputeLayerOrderUseCase
 import com.jupgi.origami.domain.usecase.FoldMeshAtUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -27,8 +28,12 @@ class FoldViewerViewModel
     constructor(
         repository: OrigamiRepository,
         private val foldMeshAt: FoldMeshAtUseCase,
+        computeLayerOrder: ComputeLayerOrderUseCase,
     ) : ViewModel() {
         private val model: OrigamiModel = repository.models().first()
+
+        /** 스텝 구성이 고정이라 한 번만 계산한다. */
+        private val layerOrder: List<Int> = computeLayerOrder(model)
         private var playJob: Job? = null
 
         private val _uiState = MutableStateFlow(stateAt(INITIAL_PROGRESS))
@@ -105,6 +110,7 @@ class FoldViewerViewModel
                 mesh = foldMeshAt(model, clamped),
                 currentStep = if (showStep && model.stepCount > 0) model.steps[stepIdx] else null,
                 currentStepNumber = stepIdx + 1,
+                layerOrder = layerOrder,
             )
         }
 
