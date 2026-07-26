@@ -297,13 +297,18 @@ private fun DrawScope.drawPaper(
     // 원천적으로 사라지고, 삼각형 경계의 안티앨리어싱 이음매(격자무늬)도 함께 없어진다.
     // (평평 접힌 종이는 일반 깊이 정렬로 풀리지 않아 면 단위 겹침 관계를 따로 관리해야 한다는
     //  "Rendering Method for Flat Origami"(Eurographics)의 결론과 같은 방향이다.)
-    val groups = mesh.faces.indices.groupBy { layerOrder.getOrElse(it) { 0 } }
+    // 그룹 키 = (겹, 법선 부호). 같은 겹 값이라도 다른 변환 이력의 면이 섞일 수 있으므로
+    // (겹 값은 정수라 우연히 충돌 가능) 법선 방향이 다른 면을 같은 색으로 칠하지 않게 세분한다.
+    val groups =
+        mesh.faces.indices.groupBy {
+            layerOrder.getOrElse(it) { 0 } to (faceNormal(camVerts, mesh.faces[it]).z >= 0f)
+        }
 
     val ordered =
         groups.entries.sortedWith(
             compareBy(
                 { (_, faces) -> groupDepth(mesh, camVerts, faces) },
-                { (layer, _) -> if (flipLayers) -layer else layer },
+                { (key, _) -> if (flipLayers) -key.first else key.first },
             ),
         )
 
@@ -405,8 +410,11 @@ private const val MAX_ZOOM = 6f
 /** 겹이 쌓이는 방향(펼친 종이의 앞면 법선). 카메라가 반대편이면 레이어 순서를 뒤집는다. */
 private val STACK_UP = Vec3(0f, 0f, 1f)
 
-/** 그림자 쪽 최소 밝기(완전히 검어지지 않게). */
-private const val AMBIENT = 0.55f
+/**
+ * 그림자 쪽 최소 밝기. 0.55 에서는 크림색 뒷면이 진회색으로 보여 "다른 색"으로 오인됐다 —
+ * 이 앱에서 음영은 입체감 힌트일 뿐, 종이의 앞/뒤 식별(주황/크림)이 항상 우선이다.
+ */
+private const val AMBIENT = 0.78f
 
 /**
  * 깊이 정렬 양자화 폭(모델 좌표, 종이 한 변이 2). 이보다 가까운 면들은 동점으로 보고
