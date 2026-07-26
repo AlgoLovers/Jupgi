@@ -53,6 +53,7 @@ import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldAssignment
 import com.jupgi.origami.domain.model.PaperMesh
 import com.jupgi.origami.domain.model.Vec3
+import com.jupgi.origami.presentation.viewer.render.ShellStack
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -301,159 +302,38 @@ private fun DrawScope.drawPaper(
     flipParity: List<Boolean>,
     projection: Projection,
 ) {
-    // ── 겹 단위 렌더링 + 기하 오프셋 + 가림 위상 정렬 ────────────────────────
-    //
-    // 1) 같은 겹의 삼각형들을 하나의 Path 로 묶어 한 번에 칠한다(색·음영 단일, 이음매 없음).
-    // 2) 각 겹을 쌓임 방향으로 `겹 × 종이두께` 만큼 실제로 띄운다 — polygon offset 계열.
-    // 3) 그리는 순서는 **가림 관계의 위상 정렬**로 정한다. "겹 전체의 평균 깊이" 정렬은
-    //    겹들이 화면에서 부분적으로만 겹칠 때 무너진다(비스듬히 보면 화면 위치가 평균
-    //    깊이를 오염 — 대문 접기의 문짝이 중앙 뒤로 가던 원인). 겹은 평면이므로, 두 겹이
-    //    화면에서 겹치면 **겹침 지점에서의 평면 깊이**를 비교하면 전 영역에서 부호가 같다.
-    //    화면상 겹치지 않는 겹끼리는 순서가 무관하므로 간선을 만들지 않는다.
-    val groups =
-        mesh.faces.indices.groupBy {
-            layerOrder.getOrElse(it) { 0 } to (faceNormal(camVerts, mesh.faces[it]).z >= 0f)
+    // 겹 구성·순서는 ShellStack(순수 로직)이 계산한다 — 픽셀 z-buffer 레퍼런스와
+    // 자동 비교 검증됨(ShellStackReferenceTest). 여기서는 결과를 색칠만 한다.
+    // 같은 셸의 연속 삼각형은 한 Path 로 병합해 그리기 호출과 경계 이음매를 줄인다.
+    val shells = ShellStack.build(mesh, camVerts, layerOrder, flipParity)
+    val shellColors =
+        shells.map { shell ->
+            // 종이는 양면 — 실제 색종이처럼 앞은 색, 뒤는 흰색. 테마와 독립적으로 둔다.
+            val base = if (shell.normal.z >= 0f) PAPER_FRONT else PAPER_BACK
+            val lambert = abs(shell.normal.dot(LIGHT_DIR))
+            val brightness = (AMBIENT + (1f - AMBIENT) * lambert).coerceIn(0f, 1f)
+            Color(base.red * brightness, base.green * brightness, base.blue * brightness, 1f)
         }
-
-    val shells =
-        groups.map { (key, faceIndices) ->
-            val representative = mesh.faces[faceIndices.first()]
-            val normal = faceNormal(camVerts, representative)
-            val flipped = flipParity.getOrElse(faceIndices.first()) { false }
-            val stackUp = if (flipped) normal * -1f else normal
-            val offset = stackUp * (key.first * PAPER_THICKNESS)
-            buildShell(mesh, camVerts, faceIndices, offset, normal)
-        }
-
-    for (shell in sortByOcclusion(shells)) {
-        // 종이는 양면 — 실제 색종이처럼 앞은 색, 뒤는 흰색. 배경과 섞이지 않게 테마와 독립적으로 둔다.
-        val base = if (shell.normal.z >= 0f) PAPER_FRONT else PAPER_BACK
-        val lambert = abs(shell.normal.dot(LIGHT_DIR))
-        val brightness = (AMBIENT + (1f - AMBIENT) * lambert).coerceIn(0f, 1f)
-        val shaded = Color(base.red * brightness, base.green * brightness, base.blue * brightness, 1f)
-
+    val order = ShellStack.triangleDrawOrder(mesh, camVerts, shells)
+    var runStart = 0
+    while (runStart < order.size) {
+        val shellIndex = order[runStart].shellIndex
+        var runEnd = runStart
+        while (runEnd + 1 < order.size && order[runEnd + 1].shellIndex == shellIndex) runEnd++
         val path = Path()
-        for (index in shell.faceIndices) {
-            val face = mesh.faces[index]
-            val s0 = projection.toScreen(camVerts[face.a] + shell.offset)
-            val s1 = projection.toScreen(camVerts[face.b] + shell.offset)
-            val s2 = projection.toScreen(camVerts[face.c] + shell.offset)
+        for (t in runStart..runEnd) {
+            val tri = order[t]
+            val s0 = projection.toScreen(tri.a)
+            val s1 = projection.toScreen(tri.b)
+            val s2 = projection.toScreen(tri.c)
             path.moveTo(s0.x, s0.y)
             path.lineTo(s1.x, s1.y)
             path.lineTo(s2.x, s2.y)
             path.close()
         }
-        drawPath(path, color = shaded)
+        drawPath(path, color = shellColors[shellIndex])
+        runStart = runEnd + 1
     }
-}
-
-/** 한 겹의 렌더 단위 — 평면(법선+기준점)과 카메라 공간 xy 범위를 든다. */
-private data class Shell(
-    val faceIndices: List<Int>,
-    val offset: Vec3,
-    val normal: Vec3,
-    val refPoint: Vec3,
-    val minX: Float,
-    val maxX: Float,
-    val minY: Float,
-    val maxY: Float,
-    val avgDepth: Float,
-)
-
-private fun buildShell(
-    mesh: PaperMesh,
-    camVerts: List<Vec3>,
-    faceIndices: List<Int>,
-    offset: Vec3,
-    normal: Vec3,
-): Shell {
-    var minX = Float.MAX_VALUE
-    var maxX = -Float.MAX_VALUE
-    var minY = Float.MAX_VALUE
-    var maxY = -Float.MAX_VALUE
-    var sumZ = 0f
-    var count = 0
-    for (index in faceIndices) {
-        val f = mesh.faces[index]
-        for (vi in intArrayOf(f.a, f.b, f.c)) {
-            val v = camVerts[vi] + offset
-            if (v.x < minX) minX = v.x
-            if (v.x > maxX) maxX = v.x
-            if (v.y < minY) minY = v.y
-            if (v.y > maxY) maxY = v.y
-            sumZ += v.z
-            count++
-        }
-    }
-    val first = mesh.faces[faceIndices.first()]
-    return Shell(
-        faceIndices = faceIndices,
-        offset = offset,
-        normal = normal,
-        refPoint = camVerts[first.a] + offset,
-        minX = minX,
-        maxX = maxX,
-        minY = minY,
-        maxY = maxY,
-        avgDepth = sumZ / count,
-    )
-}
-
-/** 평면인 겹의, 카메라 공간 (x,y) 지점에서의 깊이. 평면이 시선과 평행하면 기준점 깊이. */
-private fun Shell.depthAt(
-    x: Float,
-    y: Float,
-): Float {
-    if (abs(normal.z) < EDGE_ON_NORMAL_Z) return refPoint.z
-    return refPoint.z - (normal.x * (x - refPoint.x) + normal.y * (y - refPoint.y)) / normal.z
-}
-
-/**
- * 가림 관계 위상 정렬(Kahn). 화면(xy)에서 겹치는 두 겹은 겹침 영역 중심에서의 평면 깊이로
- * "먼 것 → 가까운 것" 간선을 만든다. 사이클(비평행 교차 등 드문 경우)은 평균 깊이 순 폴백.
- */
-private fun sortByOcclusion(shells: List<Shell>): List<Shell> {
-    val n = shells.size
-    val edges = Array(n) { mutableListOf<Int>() }
-    val indegree = IntArray(n)
-    for (i in 0 until n) {
-        for (j in i + 1 until n) {
-            val a = shells[i]
-            val b = shells[j]
-            val ox0 = maxOf(a.minX, b.minX)
-            val ox1 = minOf(a.maxX, b.maxX)
-            val oy0 = maxOf(a.minY, b.minY)
-            val oy1 = minOf(a.maxY, b.maxY)
-            if (ox0 >= ox1 || oy0 >= oy1) continue // 화면상 안 겹침 — 순서 무관
-            val mx = (ox0 + ox1) / 2f
-            val my = (oy0 + oy1) / 2f
-            val za = a.depthAt(mx, my)
-            val zb = b.depthAt(mx, my)
-            if (za < zb) {
-                edges[i].add(j)
-                indegree[j]++
-            } else {
-                edges[j].add(i)
-                indegree[i]++
-            }
-        }
-    }
-    val ready = ArrayDeque((0 until n).filter { indegree[it] == 0 }.sortedBy { shells[it].avgDepth })
-    val result = ArrayList<Shell>(n)
-    val done = BooleanArray(n)
-    while (ready.isNotEmpty()) {
-        val i = ready.removeFirst()
-        done[i] = true
-        result += shells[i]
-        for (next in edges[i]) {
-            indegree[next]--
-            if (indegree[next] == 0) ready.addLast(next)
-        }
-    }
-    if (result.size < n) { // 사이클 폴백
-        result += (0 until n).filter { !done[it] }.sortedBy { shells[it].avgDepth }.map { shells[it] }
-    }
-    return result
 }
 
 private fun DrawScope.drawCrease(
@@ -489,15 +369,6 @@ private fun rotateCamera(
     return Vec3(x1, y2, z2)
 }
 
-/** 면의 법선(카메라 좌표계). 한 겹은 한 평면이라 대표 면 하나로 겹 전체의 향을 정할 수 있다. */
-private fun faceNormal(
-    camVerts: List<Vec3>,
-    face: Face,
-): Vec3 {
-    val p0 = camVerts[face.a]
-    return (camVerts[face.b] - p0).cross(camVerts[face.c] - p0).normalized()
-}
-
 private const val DRAG_SENSITIVITY = 0.01f
 private const val PITCH_LIMIT = 1.4f
 
@@ -515,16 +386,6 @@ private const val MAX_ZOOM = 6f
  * 이 앱에서 음영은 입체감 힌트일 뿐, 종이의 앞/뒤 식별(주황/크림)이 항상 우선이다.
  */
 private const val AMBIENT = 0.78f
-
-/**
- * 겹당 종이 두께(모델 좌표, 종이 한 변 = 2). 렌더 시점에 겹을 쌓임 방향으로 이만큼 띄워
- * 동일평면 z-fighting 을 원천 제거한다 — polygon offset/데칼 계열의 표준 기법.
- * 화면(기본 줌)에서 겹당 약 1px, 접힌 모서리에서 도톰한 종이 느낌.
- */
-private const val PAPER_THICKNESS = 0.008f
-
-/** 이보다 |normal.z| 가 작으면 겹이 화면과 거의 수직(선으로 보임) — 평면 깊이식이 발산한다. */
-private const val EDGE_ON_NORMAL_Z = 1e-4f
 
 /** 색종이 앞면 — 따뜻한 주황. */
 private val PAPER_FRONT = Color(0xFFE8703A)
