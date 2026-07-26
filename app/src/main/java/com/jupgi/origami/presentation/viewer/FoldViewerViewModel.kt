@@ -28,12 +28,15 @@ class FoldViewerViewModel
     constructor(
         repository: OrigamiRepository,
         private val foldMeshAt: FoldMeshAtUseCase,
-        computeLayerOrder: ComputeLayerOrderUseCase,
+        private val computeLayerOrder: ComputeLayerOrderUseCase,
     ) : ViewModel() {
         private val model: OrigamiModel = repository.models().first()
 
-        /** 스텝 구성이 고정이라 한 번만 계산한다. */
-        private val layerOrder: List<Int> = computeLayerOrder(model)
+        /**
+         * 겹 순서는 progress 의 함수다(반영된 스텝 수가 바뀔 때만 달라진다).
+         * 최종 순서를 전 구간에 쓰면 아직 접지 않은 스텝의 재배치가 미리 보이는 버그가 난다.
+         */
+        private val layerOrderByStep = HashMap<Int, List<Int>>()
         private var playJob: Job? = null
 
         private val _uiState = MutableStateFlow(stateAt(INITIAL_PROGRESS))
@@ -110,8 +113,14 @@ class FoldViewerViewModel
                 mesh = foldMeshAt(model, clamped),
                 currentStep = if (showStep && model.stepCount > 0) model.steps[stepIdx] else null,
                 currentStepNumber = stepIdx + 1,
-                layerOrder = layerOrder,
+                layerOrder = layerOrderAt(clamped),
             )
+        }
+
+        /** 반영 스텝 수가 같으면 결과가 같으므로 그 수를 키로 캐시한다(재생 중 매 프레임 호출됨). */
+        private fun layerOrderAt(progress: Float): List<Int> {
+            val effective = computeLayerOrder.effectiveStepCount(model, progress)
+            return layerOrderByStep.getOrPut(effective) { computeLayerOrder(model, progress) }
         }
 
         companion object {

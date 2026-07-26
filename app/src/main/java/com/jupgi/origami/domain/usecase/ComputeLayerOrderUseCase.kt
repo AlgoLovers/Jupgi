@@ -4,28 +4,29 @@ import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldStep
 import com.jupgi.origami.domain.model.OrigamiModel
 import javax.inject.Inject
+import kotlin.math.abs
+import kotlin.math.floor
 
 /**
- * 각 면이 **몇 번째 겹**인지 계산한다. 값이 클수록 위(뷰어 쪽) 레이어.
+ * **주어진 progress 시점의** 각 면의 겹 높이를 계산한다. 값이 클수록 위(뷰어 쪽) 레이어.
  *
- * ## 왜 필요한가
+ * ## 왜 progress 의 함수인가 (실기기 버그의 원인)
  *
- * 반으로 접으면 겹친 종이가 완전히 동일평면이 된다. 이때 깊이만으로는 어느 겹이 위인지 알 수
- * 없다 — 옳은 순서를 알려면 접기 이력이 필요하다.
+ * 겹 순서는 시간에 따라 변한다. 1단계만 접힌 시점의 겹은 [왼쪽(위) / 오른쪽(아래)] 2겹인데,
+ * **모든 스텝이 끝난 최종 순서를 전 구간에 적용하면** 아직 접지도 않은 2단계의 재배치(우상이
+ * 최상단)가 미리 반영되어, 한 번 접힌 종이의 위쪽 절반만 앞면색으로 그려지는 버그가 났다.
  *
- * ## 규칙: 접는 쪽은 **순서가 뒤집힌 채로** 반대쪽 위에 얹힌다
+ * ## 규칙: 접는 쪽은 **순서가 뒤집힌 채로** 반대쪽에 얹힌다
  *
- * 종이 뭉치를 통째로 넘기면 **맨 위에 있던 장이 맨 아래로 간다.** 이 반전을 빠뜨리면 두 번
- * 접었을 때 겉면이 실제 종이와 달라진다(실증: 정사각형을 반으로 두 번 접으면 겉면 두 장이
- * 모두 뒷면색이어야 하는데, 반전을 무시하면 한쪽이 앞면색으로 나왔다).
+ * 종이 뭉치를 통째로 넘기면 맨 위 장이 맨 아래로 간다. 각 단계마다:
+ * - 계곡접기(각 ≥ 0)는 움직이는 쪽을 뒤집어 고정된 쪽 **위에** 쌓는다.
+ * - 산접기(각 < 0)는 뒤집어 고정된 쪽 **아래에** 쌓는다.
  *
- * 그래서 각 단계마다:
- * - 계곡접기(각 ≥ 0)는 움직이는 쪽을 **뒤집어 고정된 쪽 위에** 쌓는다.
- * - 산접기(각 < 0)는 **뒤집어 고정된 쪽 아래에** 쌓는다.
+ * ## 진행 중인 스텝의 반영 시점
  *
- * 예) 정사각형을 (1) 왼쪽→오른쪽, (2) 위→아래로 접으면 실제 종이의 겹은 아래에서부터
- * **우하 → 좌하 → 좌상 → 우상** 이고, 이 규칙이 그대로 재현한다. (1단계에서 좌상이 우상 위에
- * 올라갔다가, 2단계에서 위쪽 뭉치가 통째로 넘어가며 둘의 상하가 뒤바뀐다.)
+ * 회전 중인 뭉치의 상하가 실제로 뒤집히는 것은 **회전각이 90°를 넘는 순간**이다. 그 전에는
+ * 직전 스텝까지의 순서가 유효하다(뭉치 내부 조각들은 서로 같은 평면이라 깊이로는 갈리지 않고,
+ * 이 순서가 화면을 결정한다). 그래서 `t·|foldAngleDeg| ≥ 90°` 부터 해당 스텝을 반영한다.
  *
  * ## 한계
  *
@@ -35,17 +36,36 @@ import javax.inject.Inject
 class ComputeLayerOrderUseCase
     @Inject
     constructor() {
-        /** @return 면 인덱스 → 겹 높이(클수록 위). [OrigamiModel.base] 의 면 개수와 길이가 같다. */
-        operator fun invoke(model: OrigamiModel): List<Int> {
+        /**
+         * @param progress 전역 진행도(0..stepCount). 생략하면 최종 상태.
+         * @return 면 인덱스 → 겹 높이(클수록 위). [OrigamiModel.base] 의 면 개수와 길이가 같다.
+         */
+        operator fun invoke(
+            model: OrigamiModel,
+            progress: Float = model.stepCount.toFloat(),
+        ): List<Int> {
             val faces = model.base.faces
             val layers = IntArray(faces.size)
-            model.steps.forEach { step ->
-                val moving = faces.indices.filter { movesWith(faces[it], step) }
-                if (moving.isEmpty() || moving.size == faces.size) return@forEach
-                val fixed = faces.indices.filter { it !in moving.toSet() }
-                applyStep(layers, moving, fixed, isValley = step.foldAngleDeg >= 0f)
+            model.steps.take(effectiveStepCount(model, progress)).forEach { step ->
+                val movingSet = faces.indices.filter { movesWith(faces[it], step) }.toSet()
+                if (movingSet.isEmpty() || movingSet.size == faces.size) return@forEach
+                val fixed = faces.indices.filter { it !in movingSet }
+                applyStep(layers, movingSet.toList(), fixed, isValley = step.foldAngleDeg >= 0f)
             }
             return layers.toList()
+        }
+
+        /** progress 시점에 겹 재배치가 반영되어야 할 스텝 수(0..stepCount). */
+        fun effectiveStepCount(
+            model: OrigamiModel,
+            progress: Float,
+        ): Int {
+            val clamped = progress.coerceIn(0f, model.stepCount.toFloat())
+            val full = floor(clamped).toInt()
+            if (full >= model.stepCount) return full
+            val t = clamped - full
+            val angle = abs(model.steps[full].foldAngleDeg)
+            return if (t * angle >= FLIP_THRESHOLD_DEG) full + 1 else full
         }
 
         /**
@@ -80,4 +100,9 @@ class ComputeLayerOrderUseCase
             face.a in step.movingVertexIndices ||
                 face.b in step.movingVertexIndices ||
                 face.c in step.movingVertexIndices
+
+        companion object {
+            /** 회전 중인 뭉치의 상하가 실제로 반전되는 회전각. */
+            const val FLIP_THRESHOLD_DEG: Float = 90f
+        }
     }

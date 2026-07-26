@@ -107,6 +107,45 @@ class ComputeLayerOrderUseCaseTest {
         assertThat(visibleAbove).isEqualTo(BACK) // 둘 다 뒷면(흰색)이 보인다
     }
 
+    /**
+     * 실기기에서 발견된 버그를 고정한다 — 겹 순서는 progress 의 함수다. 1단계만 접힌 시점에
+     * **아직 접지 않은 2단계의 재배치가 미리 반영되면** 한 번 접힌 종이의 위쪽 절반만
+     * 앞면색으로 그려진다(최종 순서에서 우상이 최상단이므로).
+     */
+    @Test
+    fun layerOrderAtStepOneIgnoresFutureSteps() {
+        val model = quadrantModel()
+        val layers = computeLayerOrder(model, progress = 1.0f)
+        // 1단계 완료 시점: 왼쪽 뭉치(0=좌하, 3=좌상)가 통째로 오른쪽(1=우하, 2=우상) 위에 있다.
+        assertThat(layers[0]).isGreaterThan(layers[1])
+        assertThat(layers[0]).isGreaterThan(layers[2])
+        assertThat(layers[3]).isGreaterThan(layers[1])
+        assertThat(layers[3]).isGreaterThan(layers[2])
+        // 아직 2단계가 없으므로 좌상/좌하는 같은 높이, 우상/우하도 같은 높이다.
+        assertThat(layers[0]).isEqualTo(layers[3])
+        assertThat(layers[1]).isEqualTo(layers[2])
+    }
+
+    @Test
+    fun inProgressStepAppliesOnlyAfterNinetyDegrees() {
+        val model = quadrantModel() // 두 스텝 모두 180° 접기 → 반영 시점은 t=0.5
+        val before = computeLayerOrder(model, progress = 1.4f) // 72° — 아직 1단계 기준
+        val after = computeLayerOrder(model, progress = 1.6f) // 108° — 2단계 반영
+        assertThat(before).isEqualTo(computeLayerOrder(model, progress = 1.0f))
+        assertThat(after).isEqualTo(computeLayerOrder(model, progress = 2.0f))
+    }
+
+    @Test
+    fun ninetyDegreeFoldNeverFlipsMidStep() {
+        // 90° 접기는 회전각이 90°를 넘지 않으므로 진행 중엔 겹 재배치가 일어나지 않는다.
+        val model =
+            quadrantModel().let { base ->
+                base.copy(steps = listOf(base.steps[0].copy(foldAngleDeg = 90f)))
+            }
+        assertThat(computeLayerOrder(model, progress = 0.99f))
+            .isEqualTo(computeLayerOrder(model, progress = 0f))
+    }
+
     @Test
     fun mountainFoldStacksUnderneath() {
         val model =
