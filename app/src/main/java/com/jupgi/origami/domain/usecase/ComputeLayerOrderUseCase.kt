@@ -10,36 +10,61 @@ import javax.inject.Inject
  *
  * ## 왜 필요한가
  *
- * 반으로 접으면 겹친 종이가 완전히 동일평면이 된다. 이때 렌더러의 깊이 정렬(화가 알고리즘)은
- * 어느 겹이 위인지 알 수 없어 삼각형마다 앞뒤가 뒤바뀐다(체커보드). 깊이를 양자화해 정렬을
- * 결정적으로 만들어도, **그 순서가 옳다는 보장은 없다** — 옳은 순서를 알려면 접기 이력이 필요하다.
+ * 반으로 접으면 겹친 종이가 완전히 동일평면이 된다. 이때 깊이만으로는 어느 겹이 위인지 알 수
+ * 없다 — 옳은 순서를 알려면 접기 이력이 필요하다.
  *
- * ## 규칙
+ * ## 규칙: 접는 쪽은 **순서가 뒤집힌 채로** 반대쪽 위에 얹힌다
  *
- * 계곡접기는 움직인 종이를 고정된 종이 **위에** 올린다. 그리고 **나중 단계일수록 더 위**에 쌓인다.
- * 그래서 스텝 i에서 움직인 면에 `2^i` 을 더하면, 합의 크기가 곧 겹 순서가 된다.
+ * 종이 뭉치를 통째로 넘기면 **맨 위에 있던 장이 맨 아래로 간다.** 이 반전을 빠뜨리면 두 번
+ * 접었을 때 겉면이 실제 종이와 달라진다(실증: 정사각형을 반으로 두 번 접으면 겉면 두 장이
+ * 모두 뒷면색이어야 하는데, 반전을 무시하면 한쪽이 앞면색으로 나왔다).
+ *
+ * 그래서 각 단계마다:
+ * - 계곡접기(각 ≥ 0)는 움직이는 쪽을 **뒤집어 고정된 쪽 위에** 쌓는다.
+ * - 산접기(각 < 0)는 **뒤집어 고정된 쪽 아래에** 쌓는다.
  *
  * 예) 정사각형을 (1) 왼쪽→오른쪽, (2) 위→아래로 접으면 실제 종이의 겹은 아래에서부터
- * 오른쪽아래(0) · 왼쪽아래(1) · 오른쪽위(2) · 왼쪽위(3) 순이고, 이 규칙이 그대로 재현한다.
+ * **우하 → 좌하 → 좌상 → 우상** 이고, 이 규칙이 그대로 재현한다. (1단계에서 좌상이 우상 위에
+ * 올라갔다가, 2단계에서 위쪽 뭉치가 통째로 넘어가며 둘의 상하가 뒤바뀐다.)
  *
  * ## 한계
  *
  * 단순 산·계곡접기 기준의 근사다. 역접기·스쿼시처럼 한 단계 안에서 레이어가 서로 파고드는
  * 접기는 이 규칙으로 표현되지 않는다 — 그때는 FOLD `faceOrders` 가 필요하다(M2).
- * 스텝 수가 [MAX_STEPS_FOR_BITS] 를 넘으면 상위 비트가 넘치므로 순서 보장이 깨진다.
  */
 class ComputeLayerOrderUseCase
     @Inject
     constructor() {
         /** @return 면 인덱스 → 겹 높이(클수록 위). [OrigamiModel.base] 의 면 개수와 길이가 같다. */
         operator fun invoke(model: OrigamiModel): List<Int> {
-            val steps = model.steps.take(MAX_STEPS_FOR_BITS)
-            return model.base.faces.map { face ->
-                var layer = 0
-                steps.forEachIndexed { i, step ->
-                    if (movesWith(face, step)) layer += 1 shl i
-                }
-                layer
+            val faces = model.base.faces
+            val layers = IntArray(faces.size)
+            model.steps.forEach { step ->
+                val moving = faces.indices.filter { movesWith(faces[it], step) }
+                if (moving.isEmpty() || moving.size == faces.size) return@forEach
+                val fixed = faces.indices.filter { it !in moving.toSet() }
+                applyStep(layers, moving, fixed, isValley = step.foldAngleDeg >= 0f)
+            }
+            return layers.toList()
+        }
+
+        /**
+         * 움직이는 쪽의 겹 순서를 뒤집어(`max - layer`) 고정된 쪽의 위(계곡) 또는 아래(산)로 옮긴다.
+         */
+        private fun applyStep(
+            layers: IntArray,
+            moving: List<Int>,
+            fixed: List<Int>,
+            isValley: Boolean,
+        ) {
+            val movingMax = moving.maxOf { layers[it] }
+            val movingMin = moving.minOf { layers[it] }
+            if (isValley) {
+                val top = fixed.maxOfOrNull { layers[it] } ?: 0
+                moving.forEach { layers[it] = top + 1 + (movingMax - layers[it]) }
+            } else {
+                val bottom = fixed.minOfOrNull { layers[it] } ?: 0
+                moving.forEach { layers[it] = bottom - 1 - (layers[it] - movingMin) }
             }
         }
 
@@ -55,9 +80,4 @@ class ComputeLayerOrderUseCase
             face.a in step.movingVertexIndices ||
                 face.b in step.movingVertexIndices ||
                 face.c in step.movingVertexIndices
-
-        companion object {
-            /** Int 비트 수 한계. 이보다 많은 단계는 겹 순서를 이 방식으로 표현할 수 없다. */
-            const val MAX_STEPS_FOR_BITS: Int = 30
-        }
     }
