@@ -101,7 +101,18 @@ object PaperPlaneOrigami {
                     hingeVertexB = 8,
                     movingVertexIndices = setOf(4, 6),
                     foldAngleDeg = 90f,
-                    instruction = "반대쪽 날개도 똑같이 젖혀 펴면 비행기 완성입니다.",
+                    instruction = "반대쪽 날개도 똑같이 젖혀 폅니다.",
+                ).fold(
+                    // 접기가 아니라 **자세 전환** — 완성한 비행기를 세워 든다. 전체 정점을 90°
+                    // 돌리는 강체 회전이라 물리 불변식을 통과하고, 세우면 두 날개가 양옆으로
+                    // 수평(같은 높이)이 되어 완성형이 진짜 비행기로 보인다. 테이블에 누운 채로는
+                    // 위 겹 날개(+z)와 아래 겹 날개(-z)가 반대편에 있어 어긋나 보인다.
+                    id = "plane-lift",
+                    hingeVertexA = 2,
+                    hingeVertexB = 11,
+                    movingVertexIndices = (0..15).toSet() - setOf(2, 11), // 힌지 축 위 정점 제외(회전 불변)
+                    foldAngleDeg = -90f,
+                    instruction = "완성! 비행기를 세워 들면 날개가 양옆으로 펼쳐집니다.",
                 ).build()
 
         return OrigamiModel(

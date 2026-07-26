@@ -66,7 +66,12 @@ class ComputeLayerOrderUseCase
             progress: Float = model.stepCount.toFloat(),
         ): List<Boolean> {
             val faces = model.base.faces
-            val effective = model.steps.take(effectiveStepCount(model, progress))
+            // 전체가 움직이는 스텝은 접기가 아니라 **자세 전환**(완성작 세우기 등) — 겹도
+            // 법선도 함께 돌므로 뒤집힘이 아니다. layer 계산과 동일하게 제외한다.
+            val effective =
+                model.steps
+                    .take(effectiveStepCount(model, progress))
+                    .filter { step -> faces.any { !movesWith(it, step) } }
             return faces.map { face -> effective.count { movesWith(face, it) } % 2 == 1 }
         }
 

@@ -258,7 +258,8 @@ private fun PaperCanvas(
             val projection = fixedProjection(size, zoom)
             drawPaper(mesh, camVerts, state.layerOrder, state.flipParity, projection)
             val step = state.currentStep
-            if (step != null) {
+            // 다음에 접을 선 안내가 목적이므로, 전부 접힌 완성 상태에서는 그리지 않는다.
+            if (step != null && state.progress < state.stepCount) {
                 val a = rotateCamera(step.hingeStart, yaw, pitch)
                 val b = rotateCamera(step.hingeEnd, yaw, pitch)
                 val isValley = step.assignment != FoldAssignment.MOUNTAIN
