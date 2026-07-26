@@ -3,6 +3,7 @@ package com.jupgi.origami.data.sample
 import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldAssignment
 import com.jupgi.origami.domain.model.FoldStep
+import com.jupgi.origami.domain.model.OrigamiCategory
 import com.jupgi.origami.domain.model.OrigamiModel
 import com.jupgi.origami.domain.model.PaperMesh
 import com.jupgi.origami.domain.model.Vec3
@@ -66,6 +67,7 @@ object DemoOrigami {
             id = "demo-two-halves",
             title = "반으로 두 번 접기 (연습)",
             difficulty = 1,
+            category = OrigamiCategory.BASICS,
             base = mesh,
             steps = listOf(step1, step2),
         )

@@ -1,9 +1,12 @@
 package com.jupgi.origami.presentation.viewer
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jupgi.origami.domain.model.OrigamiModel
 import com.jupgi.origami.domain.repository.OrigamiRepository
+import com.jupgi.origami.domain.repository.PlaySpeed
+import com.jupgi.origami.domain.repository.SettingsRepository
 import com.jupgi.origami.domain.usecase.ComputeLayerOrderUseCase
 import com.jupgi.origami.domain.usecase.FoldMeshAtUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,16 +24,31 @@ import kotlin.math.floor
  * 뷰어 재생 상태를 관리한다. 카메라 회전(yaw/pitch)은 순수 뷰 관심사라 화면 로컬 상태로 두고,
  * 여기서는 progress(재생 위치)와 자동 재생만 다룬다. ViewModel 은 UseCase 만 호출한다
  * (Repository 직접 호출은 로드 시 1회 모델 획득에 한정).
+ *
+ * 표시할 작품은 내비게이션 인자 `modelId` 로 정해진다(라이브러리 → 뷰어).
  */
 @HiltViewModel
 class FoldViewerViewModel
     @Inject
     constructor(
         repository: OrigamiRepository,
+        settings: SettingsRepository,
+        savedStateHandle: SavedStateHandle,
         private val foldMeshAt: FoldMeshAtUseCase,
         private val computeLayerOrder: ComputeLayerOrderUseCase,
     ) : ViewModel() {
-        private val model: OrigamiModel = repository.models().first()
+        private val model: OrigamiModel =
+            savedStateHandle.get<String>(ARG_MODEL_ID)?.let(repository::modelById)
+                ?: repository.models().first()
+
+        /** 설정의 자동 재생 배속 — 재생 루프가 매 프레임 참조한다. */
+        private var speed: PlaySpeed = PlaySpeed.NORMAL
+
+        init {
+            viewModelScope.launch {
+                settings.playSpeed.collect { speed = it }
+            }
+        }
 
         /**
          * 겹 순서는 progress 의 함수다(반영된 스텝 수가 바뀔 때만 달라진다).
@@ -82,7 +100,9 @@ class FoldViewerViewModel
                 viewModelScope.launch {
                     while (isActive && _uiState.value.progress < end) {
                         delay(FRAME_MS)
-                        val next = _uiState.value.progress + FRAME_MS.toFloat() / STEP_DURATION_MS
+                        val next =
+                            _uiState.value.progress +
+                                FRAME_MS.toFloat() / STEP_DURATION_MS * speed.multiplier
                         setProgress(next.coerceAtMost(end))
                     }
                     pause()
@@ -124,8 +144,10 @@ class FoldViewerViewModel
         }
 
         companion object {
+            /** 내비게이션 라우트 인자 이름 — `JupgiApp` 의 viewer/{modelId} 와 일치해야 한다. */
+            const val ARG_MODEL_ID = "modelId"
             private const val INITIAL_PROGRESS = 0.6f // 시작부터 3D로 반쯤 접힌 상태를 보여준다
             private const val FRAME_MS = 16L // ~60fps
-            private const val STEP_DURATION_MS = 2200f // 한 단계를 접는 데 걸리는 시간
+            private const val STEP_DURATION_MS = 2200f // 한 단계를 접는 데 걸리는 시간(1배속)
         }
     }
