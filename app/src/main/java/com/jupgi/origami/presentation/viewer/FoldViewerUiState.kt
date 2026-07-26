@@ -24,8 +24,11 @@ data class FoldViewerUiState(
      */
     val isPlaying: Boolean = false,
     /**
-     * 면별 겹 높이(클수록 위). 반으로 접으면 레이어가 동일평면이 되어 깊이만으로는 앞뒤를
-     * 가릴 수 없다 — 렌더러가 이 값으로 순서를 정한다([ComputeLayerOrderUseCase]).
+     * 면별 겹 높이(클수록 위). 렌더러가 각 겹을 쌓임 방향으로 `겹 × 종이두께` 만큼 띄워
+     * 동일평면 z-fighting 을 원천 제거한다([ComputeLayerOrderUseCase]) — OpenGL 의
+     * polygon offset, 데칼 렌더링과 같은 계열의 표준 기법.
      */
     val layerOrder: List<Int> = emptyList(),
+    /** 면별 뒤집힘 여부 — 겹 오프셋 방향(법선 × 부호) 계산에 쓴다. */
+    val flipParity: List<Boolean> = emptyList(),
 )
