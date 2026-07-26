@@ -256,9 +256,7 @@ private fun PaperCanvas(
             val mesh = state.mesh ?: return@Canvas
             val camVerts = mesh.vertices.map { rotateCamera(it, yaw, pitch) }
             val projection = fixedProjection(size, zoom)
-            // 겹이 쌓이는 방향(base +Z)이 화면 반대쪽을 향하면 레이어 순서를 뒤집는다.
-            val flipLayers = rotateCamera(STACK_UP, yaw, pitch).z < 0f
-            drawPaper(mesh, camVerts, state.layerOrder, flipLayers, projection)
+            drawPaper(mesh, camVerts, state.layerOrder, state.flipParity, projection)
             val step = state.currentStep
             if (step != null) {
                 val a = rotateCamera(step.hingeStart, yaw, pitch)
@@ -299,50 +297,55 @@ private fun DrawScope.drawPaper(
     mesh: PaperMesh,
     camVerts: List<Vec3>,
     layerOrder: List<Int>,
-    flipLayers: Boolean,
+    flipParity: List<Boolean>,
     projection: Projection,
 ) {
-    // ── 겹(layer) 단위 렌더링 ────────────────────────────────────────────────
+    // ── 겹 단위 렌더링 + 기하 오프셋 ─────────────────────────────────────────
     //
-    // 삼각형을 **개별로** 정렬해 그리면, 반으로 접혀 4겹이 완전히 포개진 순간 삼각형마다
-    // 이기는 겹이 달라져 앞/뒷면이 뒤섞인 체커보드가 된다. 정렬 키를 아무리 정교하게 만들어도
-    // 삼각형 단위로 그리는 구조 자체가 원인이다.
-    //
-    // 그래서 **같은 겹의 삼각형들을 하나의 Path 로 묶어 한 번에 칠한다.** 한 겹은 강체 변환을
-    // 함께 받으므로 항상 한 평면이고, 따라서 색·음영도 하나다. 겹 안에서 순서가 뒤집힐 여지가
-    // 원천적으로 사라지고, 삼각형 경계의 안티앨리어싱 이음매(격자무늬)도 함께 없어진다.
-    // (평평 접힌 종이는 일반 깊이 정렬로 풀리지 않아 면 단위 겹침 관계를 따로 관리해야 한다는
-    //  "Rendering Method for Flat Origami"(Eurographics)의 결론과 같은 방향이다.)
-    // 그룹 키 = (겹, 법선 부호). 같은 겹 값이라도 다른 변환 이력의 면이 섞일 수 있으므로
-    // (겹 값은 정수라 우연히 충돌 가능) 법선 방향이 다른 면을 같은 색으로 칠하지 않게 세분한다.
+    // 1) 같은 겹의 삼각형들을 하나의 Path 로 묶어 한 번에 칠한다 — 한 겹은 강체 변환을 함께
+    //    받아 항상 한 평면이라 색·음영이 하나이고, 겹 안에서 순서가 뒤집힐 여지가 없다.
+    // 2) 각 겹을 **쌓임 방향으로 `겹 × 종이두께` 만큼 실제로 띄운다.** 겹친 종이가 동일평면인
+    //    한 어떤 정렬 규칙도 보는 방향에 따라 틀릴 수 있다(이전의 화면 방향 휴리스틱이 접는
+    //    중이나 옆 각도에서 어긋나던 원인). 오프셋을 주면 깊이가 실제로 갈려 **순수 깊이
+    //    정렬만으로 어느 각도에서든 옳다** — OpenGL polygon offset·D3D depth bias·데칼
+    //    렌더링과 같은 계열의 업계 표준 기법이고, 실제 종이도 두께가 있으니 물리적으로도 맞다.
+    //    쌓임 방향 = 면 법선 × (뒤집힌 면이면 -1) — 뒤집힌 면은 법선이 스택 반대를 향한다.
+    //    도메인 기하는 불변이므로(렌더 시점만) 이후 힌지 계산에 영향이 없다.
     val groups =
         mesh.faces.indices.groupBy {
             layerOrder.getOrElse(it) { 0 } to (faceNormal(camVerts, mesh.faces[it]).z >= 0f)
         }
 
-    val ordered =
-        groups.entries.sortedWith(
-            compareBy(
-                { (_, faces) -> groupDepth(mesh, camVerts, faces) },
-                { (key, _) -> if (flipLayers) -key.first else key.first },
-            ),
-        )
+    val shells =
+        groups.map { (key, faceIndices) ->
+            val representative = mesh.faces[faceIndices.first()]
+            val normal = faceNormal(camVerts, representative)
+            val flipped = flipParity.getOrElse(faceIndices.first()) { false }
+            val stackUp = if (flipped) normal * -1f else normal
+            val offset = stackUp * (key.first * PAPER_THICKNESS)
+            val depth =
+                faceIndices
+                    .map { i ->
+                        val f = mesh.faces[i]
+                        (camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f
+                    }.average()
+                    .toFloat() + offset.z
+            Shell(faceIndices, offset, depth, normal)
+        }
 
-    for ((_, faceIndices) in ordered) {
-        val representative = mesh.faces[faceIndices.first()]
-        val normal = faceNormal(camVerts, representative)
+    for (shell in shells.sortedBy { it.depth }) {
         // 종이는 양면 — 실제 색종이처럼 앞은 색, 뒤는 흰색. 배경과 섞이지 않게 테마와 독립적으로 둔다.
-        val base = if (normal.z >= 0f) PAPER_FRONT else PAPER_BACK
-        val lambert = abs(normal.dot(LIGHT_DIR))
+        val base = if (shell.normal.z >= 0f) PAPER_FRONT else PAPER_BACK
+        val lambert = abs(shell.normal.dot(LIGHT_DIR))
         val brightness = (AMBIENT + (1f - AMBIENT) * lambert).coerceIn(0f, 1f)
         val shaded = Color(base.red * brightness, base.green * brightness, base.blue * brightness, 1f)
 
         val path = Path()
-        for (index in faceIndices) {
+        for (index in shell.faceIndices) {
             val face = mesh.faces[index]
-            val s0 = projection.toScreen(camVerts[face.a])
-            val s1 = projection.toScreen(camVerts[face.b])
-            val s2 = projection.toScreen(camVerts[face.c])
+            val s0 = projection.toScreen(camVerts[face.a] + shell.offset)
+            val s1 = projection.toScreen(camVerts[face.b] + shell.offset)
+            val s2 = projection.toScreen(camVerts[face.c] + shell.offset)
             path.moveTo(s0.x, s0.y)
             path.lineTo(s1.x, s1.y)
             path.lineTo(s2.x, s2.y)
@@ -351,6 +354,14 @@ private fun DrawScope.drawPaper(
         drawPath(path, color = shaded)
     }
 }
+
+/** 한 겹(같은 layer·같은 방향)의 렌더 단위 — 오프셋과 깊이를 함께 든다. */
+private data class Shell(
+    val faceIndices: List<Int>,
+    val offset: Vec3,
+    val depth: Float,
+    val normal: Vec3,
+)
 
 private fun DrawScope.drawCrease(
     start: Offset,
@@ -385,23 +396,6 @@ private fun rotateCamera(
     return Vec3(x1, y2, z2)
 }
 
-/**
- * 겹 전체의 대표 깊이(양자화). 완전히 접히면 겹들의 깊이가 같아져 동점이 되고,
- * 그때는 겹 순서가 앞뒤를 가른다. 접히는 중에는 깊이가 실제로 달라 이 값이 우선한다.
- */
-private fun groupDepth(
-    mesh: PaperMesh,
-    camVerts: List<Vec3>,
-    faceIndices: List<Int>,
-): Float {
-    var sum = 0f
-    for (index in faceIndices) {
-        val f = mesh.faces[index]
-        sum += (camVerts[f.a].z + camVerts[f.b].z + camVerts[f.c].z) / 3f
-    }
-    return round(sum / faceIndices.size / DEPTH_QUANTUM)
-}
-
 /** 면의 법선(카메라 좌표계). 한 겹은 한 평면이라 대표 면 하나로 겹 전체의 향을 정할 수 있다. */
 private fun faceNormal(
     camVerts: List<Vec3>,
@@ -423,9 +417,6 @@ private const val MODEL_RADIUS = 1.5f
 private const val MIN_ZOOM = 0.5f
 private const val MAX_ZOOM = 6f
 
-/** 겹이 쌓이는 방향(펼친 종이의 앞면 법선). 카메라가 반대편이면 레이어 순서를 뒤집는다. */
-private val STACK_UP = Vec3(0f, 0f, 1f)
-
 /**
  * 그림자 쪽 최소 밝기. 0.55 에서는 크림색 뒷면이 진회색으로 보여 "다른 색"으로 오인됐다 —
  * 이 앱에서 음영은 입체감 힌트일 뿐, 종이의 앞/뒤 식별(주황/크림)이 항상 우선이다.
@@ -433,10 +424,11 @@ private val STACK_UP = Vec3(0f, 0f, 1f)
 private const val AMBIENT = 0.78f
 
 /**
- * 깊이 정렬 양자화 폭(모델 좌표, 종이 한 변이 2). 이보다 가까운 면들은 동점으로 보고
- * 원래 면 순서를 유지한다 — 동일평면 레이어에서 정렬이 요동치는 것을 막는다.
+ * 겹당 종이 두께(모델 좌표, 종이 한 변 = 2). 렌더 시점에 겹을 쌓임 방향으로 이만큼 띄워
+ * 동일평면 z-fighting 을 원천 제거한다 — polygon offset/데칼 계열의 표준 기법.
+ * 화면(기본 줌)에서 겹당 약 1px, 접힌 모서리에서 도톰한 종이 느낌.
  */
-private const val DEPTH_QUANTUM = 0.02f
+private const val PAPER_THICKNESS = 0.008f
 
 /** 색종이 앞면 — 따뜻한 주황. */
 private val PAPER_FRONT = Color(0xFFE8703A)

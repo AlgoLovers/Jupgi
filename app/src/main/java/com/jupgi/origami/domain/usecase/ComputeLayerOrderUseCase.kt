@@ -55,6 +55,21 @@ class ComputeLayerOrderUseCase
             return layers.toList()
         }
 
+        /**
+         * progress 시점에 각 면이 **뒤집혀 있는가**(반영된 스텝에서 움직인 횟수가 홀수).
+         *
+         * 렌더러의 겹 오프셋 방향에 쓴다: 겹은 "쌓임 방향"으로 띄워야 하는데, 뒤집힌 면은
+         * 기하 법선이 스택 반대를 향하므로 법선 × (뒤집힘 ? -1 : +1) 이 쌓임 방향이 된다.
+         */
+        fun flipParity(
+            model: OrigamiModel,
+            progress: Float = model.stepCount.toFloat(),
+        ): List<Boolean> {
+            val faces = model.base.faces
+            val effective = model.steps.take(effectiveStepCount(model, progress))
+            return faces.map { face -> effective.count { movesWith(face, it) } % 2 == 1 }
+        }
+
         /** progress 시점에 겹 재배치가 반영되어야 할 스텝 수(0..stepCount). */
         fun effectiveStepCount(
             model: OrigamiModel,

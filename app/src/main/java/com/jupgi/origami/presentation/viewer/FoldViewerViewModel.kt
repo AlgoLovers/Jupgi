@@ -55,6 +55,7 @@ class FoldViewerViewModel
          * 최종 순서를 전 구간에 쓰면 아직 접지 않은 스텝의 재배치가 미리 보이는 버그가 난다.
          */
         private val layerOrderByStep = HashMap<Int, List<Int>>()
+        private val flipParityByStep = HashMap<Int, List<Boolean>>()
         private var playJob: Job? = null
 
         private val _uiState = MutableStateFlow(stateAt(INITIAL_PROGRESS))
@@ -134,6 +135,7 @@ class FoldViewerViewModel
                 currentStep = if (showStep && model.stepCount > 0) model.steps[stepIdx] else null,
                 currentStepNumber = stepIdx + 1,
                 layerOrder = layerOrderAt(clamped),
+                flipParity = flipParityAt(clamped),
             )
         }
 
@@ -141,6 +143,11 @@ class FoldViewerViewModel
         private fun layerOrderAt(progress: Float): List<Int> {
             val effective = computeLayerOrder.effectiveStepCount(model, progress)
             return layerOrderByStep.getOrPut(effective) { computeLayerOrder(model, progress) }
+        }
+
+        private fun flipParityAt(progress: Float): List<Boolean> {
+            val effective = computeLayerOrder.effectiveStepCount(model, progress)
+            return flipParityByStep.getOrPut(effective) { computeLayerOrder.flipParity(model, progress) }
         }
 
         companion object {

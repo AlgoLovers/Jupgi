@@ -148,6 +148,23 @@ class ComputeLayerOrderUseCaseTest {
             .isEqualTo(computeLayerOrder(model, progress = 0f))
     }
 
+    /** 오프셋 방향의 원천 — 뒤집힘 홀짝이 접기 이력과 일치해야 겹이 옳은 쪽으로 띄워진다. */
+    @Test
+    fun flipParityCountsMovedStepsPastNinetyDegrees() {
+        val model = quadrantModel()
+        // 면: 0=좌하(1단계만), 1=우하(안 움직임), 2=우상(2단계만), 3=좌상(두 번)
+        assertThat(computeLayerOrder.flipParity(model, progress = 2.0f))
+            .containsExactly(true, false, true, false)
+            .inOrder()
+        // 1단계만 접힌 시점: 왼쪽만 뒤집혀 있다.
+        assertThat(computeLayerOrder.flipParity(model, progress = 1.0f))
+            .containsExactly(true, false, false, true)
+            .inOrder()
+        // 2단계 90° 이전에는 아직 1단계 기준.
+        assertThat(computeLayerOrder.flipParity(model, progress = 1.4f))
+            .isEqualTo(computeLayerOrder.flipParity(model, progress = 1.0f))
+    }
+
     @Test
     fun mountainFoldStacksUnderneath() {
         val model =
