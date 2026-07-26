@@ -47,6 +47,10 @@ class ComputeLayerOrderUseCase
             val faces = model.base.faces
             val layers = IntArray(faces.size)
             model.steps.take(effectiveStepCount(model, progress)).forEach { step ->
+                // |각| ≤ 90° 스텝은 종이를 세우거나 기울일 뿐 **뒤집어 포개지 않는다** — 겹
+                // 순서가 변하지 않는다(비행기 날개 90° 등). 재배치하면 수직으로 선 조각들에
+                // 스택 layer 가 재배정되어 오프셋이 어긋난다(z-buffer 검증이 검출한 버그).
+                if (abs(step.foldAngleDeg) <= FLIP_THRESHOLD_DEG) return@forEach
                 val movingSet = faces.indices.filter { movesWith(faces[it], step) }.toSet()
                 if (movingSet.isEmpty() || movingSet.size == faces.size) return@forEach
                 val fixed = faces.indices.filter { it !in movingSet }
@@ -71,6 +75,7 @@ class ComputeLayerOrderUseCase
             val effective =
                 model.steps
                     .take(effectiveStepCount(model, progress))
+                    .filter { step -> abs(step.foldAngleDeg) > FLIP_THRESHOLD_DEG }
                     .filter { step -> faces.any { !movesWith(it, step) } }
             return faces.map { face -> effective.count { movesWith(face, it) } % 2 == 1 }
         }
@@ -85,7 +90,10 @@ class ComputeLayerOrderUseCase
             if (full >= model.stepCount) return full
             val t = clamped - full
             val angle = abs(model.steps[full].foldAngleDeg)
-            return if (t * angle >= FLIP_THRESHOLD_DEG) full + 1 else full
+            // 초과(>)여야 한다: 정확히 90° 접기는 종이를 "세우는" 것이지 뒤집어 포개는 것이
+            // 아니다 — 완료 시에도 겹 재배치가 일어나지 않는다. (>= 로 두면 수직으로 선
+            // 날개 조각들에 스택 layer 가 재배정되어 오프셋이 어긋난다 — z-buffer 검증이 검출)
+            return if (t * angle > FLIP_THRESHOLD_DEG) full + 1 else full
         }
 
         /**
