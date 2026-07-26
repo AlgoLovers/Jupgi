@@ -1,5 +1,16 @@
 <resources>
     <string name="app_name">접기</string>
+
+    <!-- 라이브러리 -->
+    <string name="library_subtitle">3D로 따라 접는 종이접기</string>
+    <string name="library_coming_soon">준비 중</string>
+    <string name="library_step_count">%1$d단계</string>
+    <string name="category_basics">기본기</string>
+    <string name="category_practical">실용</string>
+    <string name="category_vehicles">탈것</string>
+    <string name="category_animals">동물</string>
+
+    <!-- 뷰어 -->
     <string name="viewer_prev_step">이전</string>
     <string name="viewer_next_step">다음</string>
     <string name="viewer_reset">처음으로</string>
@@ -7,5 +18,19 @@
     <string name="viewer_pause">❚❚  일시정지</string>
     <string name="viewer_step_label">단계 %1$d / %2$d</string>
     <string name="viewer_difficulty_label">난이도 %1$d</string>
-    <string name="viewer_drag_hint">드래그해서 돌려보기 · 화면 좌/우 탭으로 이전·다음 · 재생 중 탭하면 멈춤</string>
+    <string name="viewer_drag_hint">드래그해서 돌려보기 · 두 손가락으로 확대 · 화면 좌/우 탭으로 이전·다음</string>
+
+    <!-- 설정 -->
+    <string name="settings_title">설정</string>
+    <string name="settings_section_playback">재생</string>
+    <string name="settings_speed_slow">천천히</string>
+    <string name="settings_speed_normal">보통</string>
+    <string name="settings_speed_fast">빠르게</string>
+    <string name="settings_speed_multiplier">%1$.1f배속</string>
+    <string name="settings_section_about">정보</string>
+    <string name="settings_version">버전</string>
+    <string name="settings_about_description">접기는 전통 종이접기를 3D로 언제든 멈추고, 한 단계씩 돌려보며 배우는 앱입니다. 모든 작품은 저작권이 없는 전통 도안을 직접 저작해 담았습니다.</string>
+
+    <!-- 공통 -->
+    <string name="action_back">뒤로</string>
 </resources>

@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldAssignment
 import com.jupgi.origami.domain.model.FoldStep
+import com.jupgi.origami.domain.model.OrigamiCategory
 import com.jupgi.origami.domain.model.OrigamiModel
 import com.jupgi.origami.domain.model.PaperMesh
 import com.jupgi.origami.domain.model.Vec3
@@ -35,7 +36,7 @@ class FoldMeshAtUseCaseTest {
                 assignment = FoldAssignment.VALLEY,
                 instruction = "",
             )
-        return OrigamiModel("m", "t", 1, base, listOf(step))
+        return OrigamiModel("m", "t", 1, OrigamiCategory.BASICS, base, listOf(step))
     }
 
     @Test

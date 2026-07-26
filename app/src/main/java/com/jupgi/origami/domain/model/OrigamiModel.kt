@@ -9,6 +9,7 @@ data class OrigamiModel(
     val id: String,
     val title: String,
     val difficulty: Int,
+    val category: OrigamiCategory,
     val base: PaperMesh,
     val steps: List<FoldStep>,
 ) {

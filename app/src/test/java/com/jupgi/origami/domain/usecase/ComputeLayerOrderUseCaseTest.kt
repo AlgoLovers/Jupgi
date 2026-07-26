@@ -5,6 +5,7 @@ import com.jupgi.origami.data.sample.DemoOrigami
 import com.jupgi.origami.domain.model.Face
 import com.jupgi.origami.domain.model.FoldAssignment
 import com.jupgi.origami.domain.model.FoldStep
+import com.jupgi.origami.domain.model.OrigamiCategory
 import com.jupgi.origami.domain.model.OrigamiModel
 import com.jupgi.origami.domain.model.PaperMesh
 import com.jupgi.origami.domain.model.Vec3
@@ -40,6 +41,7 @@ class ComputeLayerOrderUseCaseTest {
             id = "q",
             title = "q",
             difficulty = 1,
+            category = OrigamiCategory.BASICS,
             base = PaperMesh(v, faces),
             steps =
                 listOf(

@@ -17,7 +17,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -57,7 +61,10 @@ import kotlin.math.round
 import kotlin.math.sin
 
 @Composable
-fun FoldViewerScreen(modifier: Modifier = Modifier) {
+fun FoldViewerScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val viewModel: FoldViewerViewModel = hiltViewModel()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -79,7 +86,7 @@ fun FoldViewerScreen(modifier: Modifier = Modifier) {
                         .windowInsetsPadding(WindowInsets.safeDrawing)
                         .padding(horizontal = 20.dp, vertical = 8.dp),
             ) {
-                Header(title = state.title, difficulty = state.difficulty)
+                Header(title = state.title, difficulty = state.difficulty, onBack = onBack)
 
                 Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     PaperCanvas(
@@ -125,13 +132,22 @@ fun FoldViewerScreen(modifier: Modifier = Modifier) {
 private fun Header(
     title: String,
     difficulty: Int,
+    onBack: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.action_back),
+                )
+            }
+            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
         Text(
             text = stringResource(R.string.viewer_difficulty_label, difficulty),
             style = MaterialTheme.typography.labelMedium,
