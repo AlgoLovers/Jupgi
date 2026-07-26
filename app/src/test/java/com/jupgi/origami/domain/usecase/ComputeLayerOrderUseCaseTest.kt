@@ -20,15 +20,14 @@ class ComputeLayerOrderUseCaseTest {
     private fun quadrantModel(): OrigamiModel {
         val v = mutableListOf<Vec3>()
         val faces = mutableListOf<Face>()
-        // 각 사분면의 대표 정점 3개씩 (좌하, 우하, 우상, 좌상 순)
         val corners =
             listOf(
-                Triple(-1f, -1f, 0f), // 좌하
-                Triple(1f, -1f, 0f), // 우하
-                Triple(1f, 1f, 0f), // 우상
-                Triple(-1f, 1f, 0f), // 좌상
+                -1f to -1f, // 0 좌하
+                1f to -1f, // 1 우하
+                1f to 1f, // 2 우상
+                -1f to 1f, // 3 좌상
             )
-        corners.forEach { (x, y, _) ->
+        corners.forEach { (x, y) ->
             val base = v.size
             v += Vec3(x, y, 0f)
             v += Vec3(x / 2f, y, 0f)
@@ -66,21 +65,72 @@ class ComputeLayerOrderUseCaseTest {
         )
     }
 
+    /** 그 면이 몇 번 뒤집혔는가 = 움직인 단계 수. 홀수면 뒷면이 위를 향한다. */
+    private fun flipCount(
+        model: OrigamiModel,
+        faceIndex: Int,
+    ): Int {
+        val face = model.base.faces[faceIndex]
+        return model.steps.count { step ->
+            face.a in step.movingVertexIndices ||
+                face.b in step.movingVertexIndices ||
+                face.c in step.movingVertexIndices
+        }
+    }
+
     @Test
-    fun stacksLaterFoldsOnTop() {
+    fun foldedSideIsReversedAndStackedOnTop() {
         val layers = computeLayerOrder(quadrantModel())
         // 면 순서: 0=좌하, 1=우하, 2=우상, 3=좌상.
-        // 실제 종이의 겹은 아래에서부터 우하 → 좌하 → 우상 → 좌상.
+        // 실제 종이: 1단계에서 좌상이 우상 위로 갔다가, 2단계에서 위쪽 뭉치가 통째로 넘어가며
+        // 둘의 상하가 뒤바뀐다 → 아래에서부터 우하 → 좌하 → 좌상 → 우상.
         assertThat(layers[1]).isEqualTo(0) // 우하: 한 번도 안 움직임
-        assertThat(layers[0]).isEqualTo(1) // 좌하: 1단계에서 움직임
-        assertThat(layers[2]).isEqualTo(2) // 우상: 2단계에서 움직임(더 위)
-        assertThat(layers[3]).isEqualTo(3) // 좌상: 두 단계 모두
+        assertThat(layers[0]).isEqualTo(1) // 좌하
+        assertThat(layers[3]).isEqualTo(2) // 좌상 (뒤집히며 아래로)
+        assertThat(layers[2]).isEqualTo(3) // 우상 (뒤집히며 위로) ← 최상단
+    }
+
+    /**
+     * 실기기에서 발견된 버그를 고정한다 — 반으로 두 번 접으면 **겉면 두 장이 같은 면**이어야
+     * 하는데(실제 색종이로 확인 가능) 겹 반전을 빠뜨려 한쪽이 앞면색으로 나왔다.
+     */
+    @Test
+    fun bothOuterSurfacesShowTheSameSideAfterTwoHalfFolds() {
+        val model = quadrantModel()
+        val layers = computeLayerOrder(model)
+        val top = layers.indices.maxBy { layers[it] }
+        val bottom = layers.indices.minBy { layers[it] }
+        // 위에서 보이는 면: 짝수 번 뒤집혔으면 앞면. 아래에서 보이는 면: 짝수면 뒷면(반대).
+        val visibleAbove = if (flipCount(model, top) % 2 == 0) FRONT else BACK
+        val visibleBelow = if (flipCount(model, bottom) % 2 == 0) BACK else FRONT
+        assertThat(visibleAbove).isEqualTo(visibleBelow)
+        assertThat(visibleAbove).isEqualTo(BACK) // 둘 다 뒷면(흰색)이 보인다
+    }
+
+    @Test
+    fun mountainFoldStacksUnderneath() {
+        val model =
+            quadrantModel().let { base ->
+                base.copy(
+                    steps =
+                        listOf(
+                            base.steps[0].copy(
+                                foldAngleDeg = -180f,
+                                assignment = FoldAssignment.MOUNTAIN,
+                            ),
+                        ),
+                )
+            }
+        val layers = computeLayerOrder(model)
+        // 산접기는 아래로 접히므로 움직인 좌측이 고정된 우측보다 낮아야 한다.
+        assertThat(layers[0]).isLessThan(layers[1])
+        assertThat(layers[3]).isLessThan(layers[2])
     }
 
     @Test
     fun neverMovedFaceStaysAtBottom() {
         val layers = computeLayerOrder(quadrantModel())
-        assertThat(layers.min()).isEqualTo(0)
+        assertThat(layers[1]).isEqualTo(layers.min())
     }
 
     @Test
@@ -92,13 +142,17 @@ class ComputeLayerOrderUseCaseTest {
     @Test
     fun demoHasFourDistinctLayers() {
         // 두 번 접으면 4겹이 된다.
-        val layers = computeLayerOrder(DemoOrigami.model())
-        assertThat(layers.toSet()).hasSize(4)
+        assertThat(computeLayerOrder(DemoOrigami.model()).toSet()).hasSize(4)
     }
 
     @Test
     fun modelWithoutStepsIsAllZero() {
         val model = quadrantModel().copy(steps = emptyList())
         assertThat(computeLayerOrder(model).toSet()).containsExactly(0)
+    }
+
+    private companion object {
+        const val FRONT = "앞면"
+        const val BACK = "뒷면"
     }
 }
